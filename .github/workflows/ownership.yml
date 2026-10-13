@@ -1,0 +1,36 @@
+# Dogfooding: OwnerShip quizzes the authors of pull requests on this repository, using the
+# action from the checked-out code. On issue_comment, actions/checkout fetches the default
+# branch, never the PR code; on pull_request, fork PRs get no secrets and are skipped.
+name: OwnerShip
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ownership-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  ownership:
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/ownership'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./
+        with:
+          provider: anthropic
+          model: claude-opus-5-5
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}

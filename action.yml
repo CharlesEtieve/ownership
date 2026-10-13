@@ -1,0 +1,66 @@
+name: OwnerShip
+description: 'You shipped it. But do you own it? Friendly quizzes for PR authors about their own changes.'
+author: CharlesEtieve
+
+branding:
+  icon: anchor
+  color: blue
+
+inputs:
+  provider:
+    description: 'Model provider: "anthropic", "openai" or "openai-compatible" (Ollama, vLLM, LM Studio, gateways...).'
+    required: false
+    default: anthropic
+  model:
+    description: 'Model name, for example "claude-opus-5-5", "gpt-5" or "qwen2.5-coder:14b".'
+    required: true
+  api-key:
+    description: 'API key for the provider. Pass it from a secret. Optional for local OpenAI-compatible servers.'
+    required: false
+    default: ''
+  base-url:
+    description: 'Custom API base URL (proxy, gateway or local server). Required for "openai-compatible".'
+    required: false
+    default: ''
+  questions:
+    description: 'Number of questions per quiz (1 to 5).'
+    required: false
+    default: '3'
+  language:
+    description: 'Language of the quiz and feedback, for example "en", "fr", "de" or "pt-BR". Interface texts are available in English and French.'
+    required: false
+    default: en
+  max-diff-chars:
+    description: 'Maximum number of diff characters sent to the model. Source code is kept first; the rest is truncated.'
+    required: false
+    default: '40000'
+  exclude-paths:
+    description: 'Extra glob patterns to ignore (one per line or comma-separated), added to the built-in list of lockfiles and generated files. Prefix with "!" to re-include.'
+    required: false
+    default: ''
+  min-changed-lines:
+    description: 'No quiz when fewer lines than this changed (after filtering).'
+    required: false
+    default: '10'
+  fail-on-unanswered:
+    description: 'Set an "OwnerShip" commit status that stays pending until the author answers. Requires "statuses: write". Mark the status as required in branch protection to block merging.'
+    required: false
+    default: 'false'
+  max-attempts:
+    description: 'How many times the author may answer a quiz; the best attempt counts.'
+    required: false
+    default: '3'
+  github-token:
+    description: 'Token used to read the PR and write comments, labels and statuses.'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  result:
+    description: 'What happened: quiz-posted, quiz-refreshed, quiz-updated, unchanged, evaluated or skipped.'
+  rank:
+    description: 'Best badge after an evaluation: deckhand, navigator or captain (empty otherwise).'
+
+runs:
+  using: node24
+  main: dist/index.js

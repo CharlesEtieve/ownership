@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="470" viewBox="0 0 820 470" role="img" aria-label="Preview of an OwnerShip quiz comment on a pull request (placeholder: demo GIF coming soon)">
+  <style>
+    .t { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1f2328; }
+    .muted { fill: #59636e; }
+    .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; fill: #1f2328; }
+  </style>
+  <rect width="820" height="470" rx="12" fill="#f6f8fa"/>
+  <rect x="20" y="20" width="780" height="430" rx="8" fill="#ffffff" stroke="#d1d9e0"/>
+  <rect x="20" y="20" width="780" height="40" rx="8" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <rect x="20" y="52" width="780" height="8" fill="#f6f8fa"/>
+  <circle cx="44" cy="40" r="10" fill="#0969da"/>
+  <text x="62" y="45" class="t" font-size="13"><tspan font-weight="600">github-actions</tspan><tspan class="muted"> bot commented</tspan></text>
+  <text x="44" y="96" class="t" font-size="20" font-weight="600">⚓ OwnerShip: you shipped it. But do you own it?</text>
+  <text x="44" y="128" class="t" font-size="14">Hey @octocat! Before this PR sets sail, here are 3 questions about your changes.</text>
+  <text x="44" y="148" class="t muted" font-size="14">No timer, no leaderboard. Every answer, right or wrong, gets an explanation.</text>
+  <text x="44" y="186" class="t" font-size="14" font-weight="600">1. Why retry only on 429, 502, 503 and 504, and not on every 5xx?</text>
+  <text x="44" y="204" class="t muted" font-size="12">🧭 Design · src/http/client.ts</text>
+  <text x="44" y="236" class="t" font-size="14" font-weight="600">2. What happens if Retry-After is a date instead of a number of seconds?</text>
+  <text x="44" y="254" class="t muted" font-size="12">🪨 Edge cases · src/http/client.ts</text>
+  <text x="44" y="286" class="t" font-size="14" font-weight="600">3. What is the worst-case wait for callers of get(), and is it acceptable?</text>
+  <text x="44" y="304" class="t muted" font-size="12">🌊 Impact · src/http/client.ts</text>
+  <rect x="44" y="322" width="732" height="86" rx="6" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <text x="60" y="344" class="code">/ownership</text>
+  <text x="60" y="362" class="code">1. your answer   2. your answer   3. your answer</text>
+  <text x="60" y="390" class="code">- [ ] ⚓ Dead Reckoning: I answered without AI help</text>
+  <text x="44" y="434" class="t muted" font-size="12">Preview placeholder — demo GIF coming soon.</text>
+</svg>

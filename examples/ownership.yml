@@ -1,0 +1,44 @@
+# Copy this file to .github/workflows/ownership.yml in your repository.
+name: OwnerShip
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+# Minimal permissions: read the PR, write the quiz comment and the badge labels.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  # statuses: write   # only needed with fail-on-unanswered: true
+
+# One run at a time per PR, so answers and pushes are processed in order.
+concurrency:
+  group: ownership-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  ownership:
+    # Skip comments that are not OwnerShip answers without starting the action.
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/ownership'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: CharlesEtieve/ownership@v1
+        with:
+          provider: anthropic
+          model: claude-opus-5-5
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Everything below is optional.
+          questions: 3
+          language: en
+          min-changed-lines: 10
+          max-diff-chars: 40000
+          exclude-paths: |
+            migrations/**
+            **/*.generated.ts
+          fail-on-unanswered: false

@@ -1,0 +1,54 @@
+name: 🐛 Bug report
+description: Something does not work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem! Please never paste API keys or private code.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce
+      description: The event (PR opened, push, /ownership comment...), and anything special about the PR.
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow configuration
+      description: The OwnerShip step of your workflow, with secrets removed.
+      render: yaml
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - anthropic
+        - openai
+        - openai-compatible
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      placeholder: claude-opus-5-5
+  - type: input
+    id: version
+    attributes:
+      label: OwnerShip version
+      placeholder: v1.0.0
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: From the action run. Logs never contain your diff or key, but double-check before posting.
+      render: text

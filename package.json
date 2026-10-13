@@ -1,0 +1,53 @@
+{
+  "name": "ownership",
+  "version": "1.0.0",
+  "description": "You shipped it. But do you own it? A GitHub Action that quizzes PR authors on their own changes.",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/CharlesEtieve/ownership",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CharlesEtieve/ownership.git"
+  },
+  "keywords": [
+    "github-action",
+    "pull-request",
+    "code-review",
+    "llm",
+    "learning"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "rollup --config rollup.config.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "all": "npm run format:check && npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
+    "picomatch": "^4.0.7"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^29.0.3",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@types/node": "^24.19.2",
+    "@types/picomatch": "^4.0.3",
+    "prettier": "^3.9.10",
+    "rollup": "^4.64.6",
+    "tslib": "^2.8.1",
+    "typescript": "~5.9",
+    "vitest": "^5.0.4"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "*"
+  }
+}

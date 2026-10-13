@@ -1,0 +1,34 @@
+# OwnerShip with a model you host yourself, through any OpenAI-compatible server
+# (Ollama, vLLM, LM Studio, LiteLLM...). The diff never leaves your infrastructure.
+name: OwnerShip (local model)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ownership-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  ownership:
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/ownership'))
+    # A self-hosted runner that can reach your model server.
+    runs-on: self-hosted
+    steps:
+      - uses: CharlesEtieve/ownership@v1
+        with:
+          provider: openai-compatible
+          base-url: http://ollama.internal:11434/v1
+          model: qwen2.5-coder:14b
+          # api-key is optional; set it if your server or gateway requires one.
+          # api-key: ${{ secrets.LLM_GATEWAY_KEY }}
