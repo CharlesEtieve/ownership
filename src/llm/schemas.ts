@@ -1,4 +1,12 @@
-import { FOCUS_AREAS, GRADES, type Focus, type Grade } from '../comment/state.js'
+import {
+  FOCUS_AREAS,
+  GRADES,
+  OPTION_LETTERS,
+  type Focus,
+  type Grade,
+  type OptionLetter,
+  type QuizFormat
+} from '../comment/state.js'
 
 export type JsonSchema = Record<string, unknown>
 
@@ -11,6 +19,9 @@ export interface GeneratedQuestion {
   question: string
   focus: Focus
   files: string[]
+  /** Multiple-choice only: the options and the one the model considers right. */
+  options?: string[] | undefined
+  answer?: OptionLetter | undefined
 }
 
 export interface GeneratedQuiz {
@@ -22,6 +33,8 @@ export interface Evaluation {
   grade: Grade
   feedback: string
   explanation: string
+  /** Multiple-choice only: the right option. */
+  correct?: OptionLetter | undefined
 }
 
 export interface EvaluationResult {
@@ -52,6 +65,29 @@ export const QUIZ_SCHEMA: JsonSchema = {
   }
 }
 
+export const CHOICE_QUIZ_SCHEMA: JsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['questions'],
+  properties: {
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['question', 'focus', 'files', 'options', 'answer'],
+        properties: {
+          question: { type: 'string' },
+          focus: { type: 'string', enum: [...FOCUS_AREAS] },
+          files: { type: 'array', items: { type: 'string' } },
+          options: { type: 'array', items: { type: 'string' } },
+          answer: { type: 'string', enum: [...OPTION_LETTERS] }
+        }
+      }
+    }
+  }
+}
+
 export const EVALUATION_SCHEMA: JsonSchema = {
   type: 'object',
   additionalProperties: false,
@@ -65,6 +101,30 @@ export const EVALUATION_SCHEMA: JsonSchema = {
         required: ['id', 'grade', 'feedback', 'explanation'],
         properties: {
           id: { type: 'integer' },
+          grade: { type: 'string', enum: [...GRADES] },
+          feedback: { type: 'string' },
+          explanation: { type: 'string' }
+        }
+      }
+    },
+    summary: { type: 'string' }
+  }
+}
+
+export const CHOICE_EVALUATION_SCHEMA: JsonSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['evaluations', 'summary'],
+  properties: {
+    evaluations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'correct', 'grade', 'feedback', 'explanation'],
+        properties: {
+          id: { type: 'integer' },
+          correct: { type: 'string', enum: [...OPTION_LETTERS] },
           grade: { type: 'string', enum: [...GRADES] },
           feedback: { type: 'string' },
           explanation: { type: 'string' }
@@ -90,7 +150,11 @@ const FOCUS_ALIASES: Record<string, Focus> = {
 }
 
 /** Validates a generated quiz. Extra questions are dropped; missing ones are an error. */
-export function validateQuiz(data: unknown, expectedCount: number): GeneratedQuiz {
+export function validateQuiz(
+  data: unknown,
+  expectedCount: number,
+  format: QuizFormat = 'open'
+): GeneratedQuiz {
   const root = expectObject(data, '$')
   const questions = expectArray(root.questions, '$.questions')
   if (questions.length < expectedCount) {
@@ -105,6 +169,7 @@ export function validateQuiz(data: unknown, expectedCount: number): GeneratedQui
       const text = expectString(question.question, `${path}.question`).trim()
       if (!text) throw new SchemaError(`${path}.question is empty`)
       return {
+        ...(format === 'multiple-choice' ? validateOptions(question, path) : {}),
         question: text,
         focus: normalizeFocus(question.focus),
         files:
@@ -118,10 +183,45 @@ export function validateQuiz(data: unknown, expectedCount: number): GeneratedQui
   }
 }
 
-/** Validates an evaluation: one entry per question id, a known grade, non-empty texts. */
+function validateOptions(
+  question: Record<string, unknown>,
+  path: string
+): { options: string[]; answer: OptionLetter } {
+  const options = expectArray(question.options, `${path}.options`).map((option, index) =>
+    expectString(option, `${path}.options[${index}]`)
+      .replace(/\s+/g, ' ')
+      // Models sometimes prefix options with their letter ("B) ..."); the letter is added on display.
+      .replace(/^\(?[A-D]\s*[).:]\s+/i, '')
+      .trim()
+  )
+  if (options.length !== OPTION_LETTERS.length) {
+    throw new SchemaError(
+      `${path}.options must contain exactly ${OPTION_LETTERS.length} options, got ${options.length}`
+    )
+  }
+  if (options.some(option => !option)) throw new SchemaError(`${path}.options has an empty option`)
+  if (new Set(options.map(option => option.toLowerCase())).size !== options.length) {
+    throw new SchemaError(`${path}.options must all be different`)
+  }
+  const answer = expectString(question.answer, `${path}.answer`).trim().toUpperCase()
+  if (!isOptionLetter(answer)) {
+    throw new SchemaError(`${path}.answer must be one of ${OPTION_LETTERS.join(', ')}`)
+  }
+  return { options, answer }
+}
+
+export function isOptionLetter(value: string): value is OptionLetter {
+  return (OPTION_LETTERS as readonly string[]).includes(value)
+}
+
+/**
+ * Validates an evaluation: one entry per question id, a known grade, non-empty texts. For
+ * multiple-choice quizzes, pass the number of options per question id to also require the right option.
+ */
 export function validateEvaluation(
   data: unknown,
-  questionIds: readonly number[]
+  questionIds: readonly number[],
+  optionCounts?: ReadonlyMap<number, number>
 ): EvaluationResult {
   const root = expectObject(data, '$')
   const items = expectArray(root.evaluations, '$.evaluations')
@@ -138,12 +238,23 @@ export function validateEvaluation(
       throw new SchemaError(`${path}.grade must be one of ${GRADES.join(', ')} (got "${grade}")`)
     }
     if (questionIds.includes(id) && !byId.has(id)) {
-      byId.set(id, {
+      const evaluation: Evaluation = {
         id,
         grade: grade as Grade,
         feedback: expectString(entry.feedback, `${path}.feedback`).trim(),
         explanation: expectString(entry.explanation, `${path}.explanation`).trim()
-      })
+      }
+      const optionCount = optionCounts?.get(id)
+      if (optionCount !== undefined) {
+        const correct = expectString(entry.correct, `${path}.correct`).trim().toUpperCase()
+        if (!OPTION_LETTERS.slice(0, optionCount).includes(correct as OptionLetter)) {
+          throw new SchemaError(
+            `${path}.correct must be one of ${OPTION_LETTERS.slice(0, optionCount).join(', ')}`
+          )
+        }
+        evaluation.correct = correct as OptionLetter
+      }
+      byId.set(id, evaluation)
     }
   })
   const missing = questionIds.filter(id => !byId.has(id))

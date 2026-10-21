@@ -2,7 +2,7 @@
 
 **You shipped it. But do you own it?**
 
-OwnerShip is a GitHub Action that asks the author of each pull request two or three friendly questions about their own changes: why this design, what happens when it fails, what else it touches. It grades the answers with kindness, explains the right ones, and hands out badges.
+OwnerShip is a GitHub Action that asks the author of each pull request two or three friendly multiple-choice questions about their own changes: why this design, what happens when it fails, what else it touches. It grades the answers with kindness, explains the right ones, and hands out badges.
 
 More and more code is written with AI. That is great, as long as the humans who ship it still understand it. OwnerShip keeps people in the loop the fun way: no timer, no leaderboard, no blocking check unless you ask for one. You bring your own model (an API key or a model you host), and everything lives in your repository and in GitHub.
 
@@ -13,8 +13,10 @@ More and more code is written with AI. That is great, as long as the humans who 
 ## How it works
 
 1. **A PR is opened** (or marked ready for review). OwnerShip reads the diff, skips the noise (lockfiles, build output, generated code), and asks your model for questions about the _why_ and the _consequences_ of the change. Never trivia.
-2. **The author answers** in a comment that starts with `/ownership`, whenever they like.
-3. **OwnerShip debriefs**: every answer is graded `solid`, `partial` or `missing`, with friendly feedback and an explanation of what a strong answer covers. The PR gets a badge label, and the author can try again to aim higher.
+2. **The author answers** in a comment that starts with `/ownership` and their picks, like `/ownership 1B 2A 3D`, whenever they like.
+3. **OwnerShip debriefs**: every pick gets friendly feedback and an explanation of why the right option is right. The PR gets a badge label.
+
+Prefer answers in the author's own words? Set `format: open`: answers are then a few sentences each, graded `solid`, `partial` or `missing`, and the author can try again to aim higher.
 
 ## Quickstart
 
@@ -56,21 +58,28 @@ That's it. Open a pull request and the quiz appears as a comment. More examples 
 
 ## Answering a quiz
 
-Reply to the PR with a comment that starts with `/ownership`, one numbered answer per question:
+Each question comes with four options, one of them right. Reply to the PR with a comment that starts with `/ownership` and your picks:
+
+```text
+/ownership 1B 2A 3D
+```
+
+Or one per line, with an optional reason after a letter (a sound reason can earn credit even when the pick is wrong):
 
 ```text
 /ownership
-1. We only retry statuses that mean "try again later"; a 500 is usually a bug.
-2. Number() turns a date into NaN, so we fall back to exponential backoff.
-3. Up to four 10 s attempts plus the waits, so more than 40 s in the worst case.
+1. B
+2. A, a date is not a number, so the backoff takes over
+3. D
 
 - [x] ⚓ Dead Reckoning: I answered without AI help
 ```
 
 - Only the PR author's answers are evaluated.
-- Short, informal answers are fine: the grading looks at substance, not style.
-- You get up to 3 attempts per quiz (configurable); the best one counts.
+- A multiple-choice quiz is answered once: the debrief reveals the right options, so a second try would not tell you much.
 - Tick **Dead Reckoning** if you answered from your own understanding. It is on your honour, and optional.
+
+With `format: open`, answer each question in a few sentences instead (`1. We only retry statuses that mean "try again later"...`). Short, informal answers are fine: the grading looks at substance, not style. You get up to 3 attempts (`max-attempts`), and the best one counts.
 
 ## Badges
 
@@ -79,8 +88,8 @@ Badges are PR labels, so they live in GitHub only. Each PR shows its best rank.
 | Badge                 | Earned when                              |
 | --------------------- | ---------------------------------------- |
 | ⚓ **Deckhand**       | You answered the quiz                    |
-| 🧭 **Navigator**      | No answer was `missing`                  |
-| 🏴‍☠️ **Captain**        | Every answer was `solid`                 |
+| 🧭 **Navigator**      | Every answer right or close              |
+| 🏴‍☠️ **Captain**        | Every answer right                       |
 | 🗺️ **Dead Reckoning** | You answered without AI help (on honour) |
 
 Each run also writes a short report to the workflow's job summary.
@@ -93,13 +102,14 @@ Each run also writes a short report to the workflow's job summary.
 | `model`              | _(required)_          | Model name, for example `claude-opus-5-5`, `gpt-5` or `qwen2.5-coder:14b`.                                                   |
 | `api-key`            | `''`                  | Provider API key, from a secret. Optional for local servers.                                                                 |
 | `base-url`           | `''`                  | Custom API base URL (proxy, gateway, local server). Required for `openai-compatible`.                                        |
+| `format`             | `multiple-choice`     | `multiple-choice` (pick one of four options) or `open` (answer in a few sentences).                                          |
 | `questions`          | `3`                   | Questions per quiz, from 1 to 5.                                                                                             |
 | `language`           | `en`                  | Language of the questions and feedback (`fr`, `de`, `pt-BR`...). Interface texts are translated in English and French.       |
 | `max-diff-chars`     | `40000`               | Maximum diff size sent to the model. Source code goes first; the rest is truncated, and the model is told what was cut.      |
 | `exclude-paths`      | `''`                  | Extra globs to ignore, one per line or comma-separated, on top of the built-in list. Prefix with `!` to re-include a path.   |
 | `min-changed-lines`  | `10`                  | No quiz below this many changed lines (after filtering).                                                                     |
 | `fail-on-unanswered` | `false`               | Add an `OwnerShip` commit status that stays pending until the author answers. See [Making it blocking](#making-it-blocking). |
-| `max-attempts`       | `3`                   | How many times the author may answer a quiz.                                                                                 |
+| `max-attempts`       | `3`                   | How many times the author may answer an open quiz. Multiple-choice quizzes are answered once.                                |
 | `github-token`       | `${{ github.token }}` | Token used to read the PR and write comments, labels and statuses.                                                           |
 
 **Outputs:** `result` (`quiz-posted`, `quiz-refreshed`, `quiz-updated`, `unchanged`, `evaluated` or `skipped`) and `rank` (`deckhand`, `navigator` or `captain` after an evaluation).
@@ -150,7 +160,7 @@ Gateways and proxies that speak the OpenAI or Anthropic API (LiteLLM, OpenRouter
 
 - **What is sent, and where.** The PR title, description and the filtered diff (up to `max-diff-chars`) are sent to the provider you configure, and only to it. The author's answers are sent to the same provider for grading. If your code must not leave your network, use a model you host.
 - **No server, no telemetry.** OwnerShip has no backend and collects nothing. State lives in a hidden marker inside the quiz comment, and badges are labels.
-- **No expected answers on display.** The hidden state holds the questions, not the answers: anyone can read it through the API, so it would be a cheat sheet.
+- **No expected answers on display.** The hidden state holds the questions and their options, not the right ones: anyone can read it through the API, so it would be a cheat sheet.
 - **Secrets stay secret.** The API key is masked in logs and never written anywhere. Logs only contain sizes (files, lines, characters), never the diff.
 - **Fork PRs are skipped, on purpose.** GitHub does not share secrets with workflows triggered by pull requests from forks, so OwnerShip cannot reach the model and skips them with a notice. This is expected behaviour.
 - **No `pull_request_target`.** OwnerShip refuses to run on `pull_request_target`, and never checks out or runs PR code: the diff is read through the GitHub API. Do not combine `pull_request_target` with a checkout of PR code in your own workflows.
@@ -176,6 +186,9 @@ Fork PRs only get a read-only token, so the status cannot be set on them: don't 
 
 **What if developers cheat and ask an AI to answer?**
 They can, and that's fine: OwnerShip is not an exam, it's practice. Nobody is ranked, nothing is blocked by default, and the explanations are there either way, so even a copied answer leaves you having read why the code works. The Dead Reckoning box is a nudge, on honour, for those who want to train without instruments.
+
+**Why multiple choice by default? Can't you just guess?**
+Picking a letter takes seconds, so people actually answer. A blind guess is right one time in four, and the options are written so that the wrong ones are plausible misreadings of the change: telling them apart is the exercise. The right options are not stored anywhere readable before you answer; the model checks your picks against the diff when it grades them. If you want answers in your own words, use `format: open`.
 
 **Will it spam the PR on every push?**
 No. There is a single quiz comment per PR, edited in place. After a push, the questions are regenerated only if the quiz is still unanswered _and_ the change is significant (new source files, or more than 30% more or fewer changed lines). An answered quiz is never regenerated: the badge is earned.

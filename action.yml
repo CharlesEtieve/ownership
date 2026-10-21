@@ -22,6 +22,10 @@ inputs:
     description: 'Custom API base URL (proxy, gateway or local server). Required for "openai-compatible".'
     required: false
     default: ''
+  format:
+    description: 'How the author answers: "multiple-choice" (pick one of four options per question) or "open" (answer in a few sentences).'
+    required: false
+    default: multiple-choice
   questions:
     description: 'Number of questions per quiz (1 to 5).'
     required: false
@@ -47,7 +51,7 @@ inputs:
     required: false
     default: 'false'
   max-attempts:
-    description: 'How many times the author may answer a quiz; the best attempt counts.'
+    description: 'How many times the author may answer an open quiz; the best attempt counts. Multiple-choice quizzes are answered once, since the debrief reveals the right options.'
     required: false
     default: '3'
   github-token:

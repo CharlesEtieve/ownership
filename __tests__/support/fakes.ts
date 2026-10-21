@@ -25,6 +25,8 @@ export function makeConfig(overrides: Partial<Config> = {}): Config {
     apiKey: 'sk-test-key',
     baseUrl: undefined,
     githubToken: 'gh-token',
+    // Most handler tests exercise open answers; multiple-choice tests opt in.
+    format: 'open',
     questions: 3,
     language: 'en',
     maxDiffChars: 40_000,
@@ -161,5 +163,40 @@ export function evaluationReply(grades: string[]): EvaluationReply {
       explanation: `Explanation ${i + 1}`
     })),
     summary: 'Nice work overall.'
+  }
+}
+
+export interface ChoiceQuizReply {
+  questions: {
+    question: string
+    focus: string
+    files: string[]
+    options: string[]
+    answer: string
+  }[]
+}
+
+/** Multiple-choice quiz where the right option is always the first one the model writes. */
+export function choiceQuizReply(count = 3): ChoiceQuizReply {
+  return {
+    questions: quizReply(count).questions.map((question, i) => ({
+      ...question,
+      options: [`Right ${i + 1}`, `Wrong ${i + 1}a`, `Wrong ${i + 1}b`, `Wrong ${i + 1}c`],
+      answer: 'A'
+    }))
+  }
+}
+
+export function choiceEvaluationReply(
+  correct: string[],
+  grades: string[]
+): EvaluationReply & { evaluations: { correct: string }[] } {
+  const reply = evaluationReply(grades)
+  return {
+    ...reply,
+    evaluations: reply.evaluations.map((evaluation, i) => ({
+      ...evaluation,
+      correct: correct[i] as string
+    }))
   }
 }

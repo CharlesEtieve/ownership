@@ -1,8 +1,9 @@
 import * as core from '@actions/core'
+import { createHash } from 'node:crypto'
 import { modelLabel, requiresApiKey } from '../config.js'
 import { messagesFor } from '../comment/i18n.js'
 import { renderQuizComment, sanitize } from '../comment/render.js'
-import type { QuizQuestion, QuizState } from '../comment/state.js'
+import { OPTION_LETTERS, type QuizQuestion, type QuizState } from '../comment/state.js'
 import type { DiffDigest } from '../diff/budget.js'
 import { findQuizComment, isBotAccount } from '../github.js'
 import { quizRequest } from '../llm/prompts.js'
@@ -73,6 +74,7 @@ export async function handlePullRequest(event: PullRequestEvent, deps: Deps): Pr
       diffHash: digest.hash,
       changedLines: digest.changedLines,
       sourceFiles: digest.sourceFiles,
+      format: config.format,
       questions,
       status: 'pending',
       attempts: 0,
@@ -152,6 +154,7 @@ export async function handlePullRequest(event: PullRequestEvent, deps: Deps): Pr
       diffHash: digest.hash,
       changedLines: digest.changedLines,
       sourceFiles: digest.sourceFiles,
+      format: config.format,
       questions,
       refreshes: state.refreshes + 1
     }
@@ -208,13 +211,14 @@ async function generateQuestions(
     description,
     diff: digest.text,
     count: config.questions,
+    format: config.format,
     language: config.language,
     nonce: deps.nonce()
   })
   const quiz = await completeJson(
     deps.llm(),
     request,
-    data => validateQuiz(data, config.questions),
+    data => validateQuiz(data, config.questions, config.format),
     'quiz'
   )
   return quiz.questions.map((question, index) => ({
@@ -224,8 +228,28 @@ async function generateQuestions(
     // Keep only paths that are really part of the PR.
     files: question.files.filter(
       file => digest.includedFiles.includes(file) || digest.sourceFiles.includes(file)
-    )
+    ),
+    ...(question.options && question.answer
+      ? { options: placeAnswer(question.question, question.options, question.answer) }
+      : {})
   }))
+}
+
+/**
+ * Models tend to put the right option in the same few positions. This moves it to a position derived
+ * from the question text (stable, so tests and re-renders agree), keeping the other options in order.
+ */
+export function placeAnswer(
+  question: string,
+  options: readonly string[],
+  answer: string
+): string[] {
+  const index = OPTION_LETTERS.indexOf(answer as (typeof OPTION_LETTERS)[number])
+  const right = options[index]
+  if (right === undefined) return [...options]
+  const others = options.filter((_, i) => i !== index)
+  const position = (createHash('sha256').update(question).digest()[0] as number) % options.length
+  return [...others.slice(0, position), right, ...others.slice(position)]
 }
 
 function quizSummary(

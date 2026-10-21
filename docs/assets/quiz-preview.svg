@@ -15,13 +15,13 @@
   <text x="44" y="148" class="t muted" font-size="14">No timer, no leaderboard. Every answer, right or wrong, gets an explanation.</text>
   <text x="44" y="186" class="t" font-size="14" font-weight="600">1. Why retry only on 429, 502, 503 and 504, and not on every 5xx?</text>
   <text x="44" y="204" class="t muted" font-size="12">🧭 Design · src/http/client.ts</text>
-  <text x="44" y="236" class="t" font-size="14" font-weight="600">2. What happens if Retry-After is a date instead of a number of seconds?</text>
-  <text x="44" y="254" class="t muted" font-size="12">🪨 Edge cases · src/http/client.ts</text>
-  <text x="44" y="286" class="t" font-size="14" font-weight="600">3. What is the worst-case wait for callers of get(), and is it acceptable?</text>
-  <text x="44" y="304" class="t muted" font-size="12">🌊 Impact · src/http/client.ts</text>
-  <rect x="44" y="322" width="732" height="86" rx="6" fill="#f6f8fa" stroke="#d1d9e0"/>
-  <text x="60" y="344" class="code">/ownership</text>
-  <text x="60" y="362" class="code">1. your answer   2. your answer   3. your answer</text>
-  <text x="60" y="390" class="code">- [ ] ⚓ Dead Reckoning: I answered without AI help</text>
+  <text x="56" y="230" class="t" font-size="13">• <tspan font-weight="600">A.</tspan> Every 5xx is a server bug, so retrying would only add load.</text>
+  <text x="56" y="250" class="t" font-size="13">• <tspan font-weight="600">B.</tspan> These statuses mean "try again later"; a plain 500 usually does not.</text>
+  <text x="56" y="270" class="t" font-size="13">• <tspan font-weight="600">C.</tspan> The fetch API cannot read the status of other 5xx responses.</text>
+  <text x="56" y="290" class="t" font-size="13">• <tspan font-weight="600">D.</tspan> Retrying a 500 would break the idempotency of POST requests.</text>
+  <text x="44" y="320" class="t muted" font-size="13">2. What happens if Retry-After is a date instead of a number of seconds? …</text>
+  <rect x="44" y="338" width="732" height="70" rx="6" fill="#f6f8fa" stroke="#d1d9e0"/>
+  <text x="60" y="364" class="code">/ownership 1B 2A 3D</text>
+  <text x="60" y="390" class="code">- [x] ⚓ Dead Reckoning: I answered without AI help</text>
   <text x="44" y="434" class="t muted" font-size="12">Preview placeholder — demo GIF coming soon.</text>
 </svg>

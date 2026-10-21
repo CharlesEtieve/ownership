@@ -1,4 +1,5 @@
 import * as core from '@actions/core'
+import { FORMATS, type QuizFormat } from './comment/state.js'
 
 export const PROVIDERS = ['anthropic', 'openai', 'openai-compatible'] as const
 export type Provider = (typeof PROVIDERS)[number]
@@ -9,6 +10,7 @@ export interface Config {
   apiKey: string
   baseUrl: string | undefined
   githubToken: string
+  format: QuizFormat
   questions: number
   language: string
   maxDiffChars: number
@@ -51,6 +53,11 @@ export function readConfig(read: InputReader = name => core.getInput(name)): Con
     throw new OwnershipError(`"base-url" must start with http:// or https:// (got "${baseUrl}").`)
   }
 
+  const format = read('format').trim().toLowerCase() || 'multiple-choice'
+  if (!(FORMATS as readonly string[]).includes(format)) {
+    throw new OwnershipError(`Unsupported format "${format}". Use one of: ${FORMATS.join(', ')}.`)
+  }
+
   const apiKey = read('api-key').trim()
   if (apiKey) core.setSecret(apiKey)
 
@@ -60,6 +67,7 @@ export function readConfig(read: InputReader = name => core.getInput(name)): Con
     apiKey,
     baseUrl,
     githubToken: read('github-token').trim(),
+    format: format as QuizFormat,
     questions: clamp(
       parseInteger(read('questions'), 'questions', 3),
       MIN_QUESTIONS,

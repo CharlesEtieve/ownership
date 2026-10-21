@@ -15,11 +15,20 @@ export type Focus = (typeof FOCUS_AREAS)[number]
 export const RANKS = ['deckhand', 'navigator', 'captain'] as const
 export type Rank = (typeof RANKS)[number]
 
+/** "multiple-choice": pick a letter. "open": answer in your own words. */
+export const FORMATS = ['multiple-choice', 'open'] as const
+export type QuizFormat = (typeof FORMATS)[number]
+
+export const OPTION_LETTERS = ['A', 'B', 'C', 'D'] as const
+export type OptionLetter = (typeof OPTION_LETTERS)[number]
+
 export interface QuizQuestion {
   id: number
   text: string
   focus: Focus
   files: string[]
+  /** Answer options of a multiple-choice question, in letter order. The right one is not stored. */
+  options?: string[] | undefined
 }
 
 export interface QuizResult {
@@ -44,6 +53,8 @@ export interface QuizState {
   diffHash: string
   changedLines: number
   sourceFiles: string[]
+  /** Absent in states written before multiple-choice quizzes existed, which were all open. */
+  format?: QuizFormat | undefined
   questions: QuizQuestion[]
   status: 'pending' | 'evaluated'
   attempts: number
@@ -93,6 +104,9 @@ function isQuizState(data: unknown): data is QuizState {
   )
   if (!stringsOk || !numbersOk) return false
   if (data.status !== 'pending' && data.status !== 'evaluated') return false
+  if (data.format !== undefined && !(FORMATS as readonly unknown[]).includes(data.format)) {
+    return false
+  }
   if (!Array.isArray(data.sourceFiles) || !data.sourceFiles.every(f => typeof f === 'string')) {
     return false
   }
@@ -103,7 +117,12 @@ function isQuizState(data: unknown): data is QuizState {
       typeof q.id === 'number' &&
       typeof q.text === 'string' &&
       (FOCUS_AREAS as readonly unknown[]).includes(q.focus) &&
-      Array.isArray(q.files)
+      Array.isArray(q.files) &&
+      (q.options === undefined ||
+        (Array.isArray(q.options) &&
+          q.options.length >= 2 &&
+          q.options.length <= OPTION_LETTERS.length &&
+          q.options.every(option => typeof option === 'string')))
   )
   if (!questionsOk) return false
   if (data.result === undefined) return true
@@ -115,6 +134,10 @@ function isQuizState(data: unknown): data is QuizState {
     (RANKS as readonly unknown[]).includes(result.rank) &&
     typeof result.deadReckoning === 'boolean'
   )
+}
+
+export function formatOf(state: Pick<QuizState, 'format'>): QuizFormat {
+  return state.format ?? 'open'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

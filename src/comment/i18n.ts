@@ -1,28 +1,39 @@
-import type { Focus, Grade, Rank } from './state.js'
+import type { Focus, Grade, QuizFormat, Rank } from './state.js'
+
+/** Texts that depend on how the author answers: picking letters or writing. */
+export interface FormatTexts {
+  howToAnswer: string
+  answerPlaceholder: string
+  emptyAnswers: string
+  grades: Record<Grade, string>
+  rankRules: Record<Rank, string>
+  score: (solid: number, total: number) => string
+}
 
 /** Fixed interface texts. Questions and feedback come from the model, in the configured language. */
 export interface Messages {
+  open: FormatTexts
+  choice: FormatTexts
   quizTitle: string
   quizIntro: (author: string, count: number) => string
   focus: Record<Focus, string>
   howToAnswerTitle: string
-  howToAnswer: string
-  answerPlaceholder: string
   deadReckoningLine: string
   deadReckoningHint: string
   badgesTitle: string
-  rankRules: Record<Rank, string>
   deadReckoningRule: string
   statusPending: string
-  statusEvaluated: (rank: string, solid: number, total: number, debriefUrl?: string) => string
+  statusEvaluated: (rank: string, score: string, debriefUrl?: string) => string
   attemptsUsed: (used: number, max: number) => string
   staleNote: (quizSha: string, headSha: string) => string
   refreshedNote: (sha: string) => string
   footer: (model: string) => string
   debriefTitle: string
   debriefIntro: (author: string) => string
-  grades: Record<Grade, string>
   strongAnswer: string
+  rightOption: string
+  yourPick: (option: string) => string
+  noPick: string
   summaryTitle: string
   badgeEarned: (badge: string) => string
   previousBestStays: (badge: string) => string
@@ -31,10 +42,38 @@ export interface Messages {
   tryAgain: (left: number) => string
   lastAttempt: string
   outOfAttempts: (max: number, badge: string) => string
-  emptyAnswers: string
 }
 
 const en: Messages = {
+  open: {
+    howToAnswer:
+      'Reply to this PR with a comment that starts with `/ownership`, one numbered answer per question. A few sentences each is plenty:',
+    answerPlaceholder: 'your answer',
+    emptyAnswers:
+      'I could not find any answers after `/ownership`. Reply with `/ownership` followed by your numbered answers, for example:',
+    grades: { solid: '🟢 Solid', partial: '🟡 Partial', missing: '⚪ Missing' },
+    rankRules: {
+      deckhand: 'you answered the quiz',
+      navigator: 'no answer left missing',
+      captain: 'every answer solid'
+    },
+    score: (solid, total) => `${solid}/${total} solid`
+  },
+  choice: {
+    howToAnswer:
+      'Reply to this PR with a comment that starts with `/ownership` and the letter you pick for each question. ' +
+      'You can add a short reason after a letter if you like. The quick form `/ownership 1B 2A 3D` works too:',
+    answerPlaceholder: '?',
+    emptyAnswers:
+      'I could not find any letters after `/ownership`. Reply with `/ownership` followed by your picks, for example:',
+    grades: { solid: '🟢 Right', partial: '🟡 Close', missing: '⚪ Not quite' },
+    rankRules: {
+      deckhand: 'you answered the quiz',
+      navigator: 'every answer right or close',
+      captain: 'every answer right'
+    },
+    score: (solid, total) => `${solid}/${total} right`
+  },
   quizTitle: '⚓ OwnerShip: you shipped it. But do you own it?',
   quizIntro: (author, count) =>
     `Hey @${author}! Before this PR sets sail, here ${count === 1 ? 'is one question' : `are ${count} questions`} about your changes. ` +
@@ -49,22 +88,14 @@ const en: Messages = {
     performance: '💨 Performance'
   },
   howToAnswerTitle: 'How to answer',
-  howToAnswer:
-    'Reply to this PR with a comment that starts with `/ownership`, one numbered answer per question. A few sentences each is plenty:',
-  answerPlaceholder: 'your answer',
   deadReckoningLine: '⚓ Dead Reckoning: I answered without AI help',
   deadReckoningHint:
     'Change `[ ]` to `[x]` if you answered from your own understanding, without asking an AI. It is on your honour, and optional.',
   badgesTitle: 'Badges you can earn',
-  rankRules: {
-    deckhand: 'you answered the quiz',
-    navigator: 'no answer left missing',
-    captain: 'every answer solid'
-  },
   deadReckoningRule: 'you answered without AI help (on honour)',
   statusPending: '⏳ **Status:** waiting for your answers.',
-  statusEvaluated: (rank, solid, total, url) =>
-    `✅ **Status:** answered. Best result: **${rank}** (${solid}/${total} solid)` +
+  statusEvaluated: (rank, score, url) =>
+    `✅ **Status:** answered. Best result: **${rank}** (${score})` +
     (url ? `, see the [debrief](${url}).` : '.'),
   attemptsUsed: (used, max) => `Attempts used: ${used}/${max}.`,
   staleNote: (quizSha, headSha) =>
@@ -73,8 +104,10 @@ const en: Messages = {
   footer: model => `OwnerShip · not an exam, just practice · questions by \`${model}\``,
   debriefTitle: '⚓ OwnerShip debrief',
   debriefIntro: author => `Thanks for answering, @${author}! Here is how it went.`,
-  grades: { solid: '🟢 Solid', partial: '🟡 Partial', missing: '⚪ Missing' },
   strongAnswer: 'What a strong answer covers',
+  rightOption: 'Right answer',
+  yourPick: option => `You picked ${option}`,
+  noPick: 'No option picked.',
   summaryTitle: 'In short',
   badgeEarned: badge => `🎖️ Badge earned: **${badge}**`,
   previousBestStays: badge =>
@@ -85,12 +118,42 @@ const en: Messages = {
     `Want to aim higher? Reply again with \`/ownership\` (${left} attempt${left === 1 ? '' : 's'} left).`,
   lastAttempt: 'That was your last attempt on this PR. Fair winds! ⛵',
   outOfAttempts: (max, badge) =>
-    `You have used all ${max} attempts on this quiz, so your best result stands: **${badge}**. Fair winds! ⛵`,
-  emptyAnswers:
-    'I could not find any answers after `/ownership`. Reply with `/ownership` followed by your numbered answers, for example:'
+    (max === 1
+      ? 'You already answered this quiz, so your result stands'
+      : `You have used all ${max} attempts on this quiz, so your best result stands`) +
+    `: **${badge}**. Fair winds! ⛵`
 }
 
 const fr: Messages = {
+  open: {
+    howToAnswer:
+      'Réponds sur cette PR avec un commentaire qui commence par `/ownership`, une réponse numérotée par question. Quelques phrases suffisent :',
+    answerPlaceholder: 'ta réponse',
+    emptyAnswers:
+      'Je n’ai trouvé aucune réponse après `/ownership`. Réponds avec `/ownership` suivi de tes réponses numérotées, par exemple :',
+    grades: { solid: '🟢 Solide', partial: '🟡 Partielle', missing: '⚪ Manquante' },
+    rankRules: {
+      deckhand: 'tu as répondu au quiz',
+      navigator: 'aucune réponse manquante',
+      captain: 'toutes les réponses solides'
+    },
+    score: (solid, total) => `${solid}/${total} solides`
+  },
+  choice: {
+    howToAnswer:
+      'Réponds sur cette PR avec un commentaire qui commence par `/ownership` et la lettre que tu choisis pour chaque question. ' +
+      'Tu peux ajouter une courte justification après une lettre si tu veux. La forme rapide `/ownership 1B 2A 3D` marche aussi :',
+    answerPlaceholder: '?',
+    emptyAnswers:
+      'Je n’ai trouvé aucune lettre après `/ownership`. Réponds avec `/ownership` suivi de tes choix, par exemple :',
+    grades: { solid: '🟢 Juste', partial: '🟡 Presque', missing: '⚪ Pas tout à fait' },
+    rankRules: {
+      deckhand: 'tu as répondu au quiz',
+      navigator: 'toutes les réponses justes ou presque',
+      captain: 'toutes les réponses justes'
+    },
+    score: (solid, total) => `${solid}/${total} justes`
+  },
   quizTitle: '⚓ OwnerShip : tu l’as livré. Mais est-ce que tu le maîtrises ?',
   quizIntro: (author, count) =>
     `Salut @${author} ! Avant que cette PR ne prenne la mer, voici ${count === 1 ? 'une question' : `${count} questions`} sur tes changements. ` +
@@ -105,22 +168,14 @@ const fr: Messages = {
     performance: '💨 Performance'
   },
   howToAnswerTitle: 'Comment répondre',
-  howToAnswer:
-    'Réponds sur cette PR avec un commentaire qui commence par `/ownership`, une réponse numérotée par question. Quelques phrases suffisent :',
-  answerPlaceholder: 'ta réponse',
   deadReckoningLine: '⚓ Dead Reckoning : j’ai répondu sans aide d’une IA',
   deadReckoningHint:
     'Remplace `[ ]` par `[x]` si tu as répondu avec ta propre compréhension, sans demander à une IA. C’est sur l’honneur, et facultatif.',
   badgesTitle: 'Badges à gagner',
-  rankRules: {
-    deckhand: 'tu as répondu au quiz',
-    navigator: 'aucune réponse manquante',
-    captain: 'toutes les réponses solides'
-  },
   deadReckoningRule: 'tu as répondu sans aide d’une IA (sur l’honneur)',
   statusPending: '⏳ **Statut :** en attente de tes réponses.',
-  statusEvaluated: (rank, solid, total, url) =>
-    `✅ **Statut :** répondu. Meilleur résultat : **${rank}** (${solid}/${total} solides)` +
+  statusEvaluated: (rank, score, url) =>
+    `✅ **Statut :** répondu. Meilleur résultat : **${rank}** (${score})` +
     (url ? `, voir le [débrief](${url}).` : '.'),
   attemptsUsed: (used, max) => `Essais utilisés : ${used}/${max}.`,
   staleNote: (quizSha, headSha) =>
@@ -131,8 +186,10 @@ const fr: Messages = {
     `OwnerShip · pas un examen, juste de l’entraînement · questions par \`${model}\``,
   debriefTitle: '⚓ Débrief OwnerShip',
   debriefIntro: author => `Merci pour tes réponses, @${author} ! Voici le débrief.`,
-  grades: { solid: '🟢 Solide', partial: '🟡 Partielle', missing: '⚪ Manquante' },
   strongAnswer: 'Ce que couvre une bonne réponse',
+  rightOption: 'Bonne réponse',
+  yourPick: option => `Tu as choisi ${option}`,
+  noPick: 'Aucune option choisie.',
   summaryTitle: 'En bref',
   badgeEarned: badge => `🎖️ Badge obtenu : **${badge}**`,
   previousBestStays: badge =>
@@ -143,9 +200,14 @@ const fr: Messages = {
     `Envie de viser plus haut ? Réponds à nouveau avec \`/ownership\` (${left} essai${left === 1 ? '' : 's'} restant${left === 1 ? '' : 's'}).`,
   lastAttempt: 'C’était ton dernier essai sur cette PR. Bon vent ! ⛵',
   outOfAttempts: (max, badge) =>
-    `Tu as utilisé tes ${max} essais sur ce quiz, ton meilleur résultat reste : **${badge}**. Bon vent ! ⛵`,
-  emptyAnswers:
-    'Je n’ai trouvé aucune réponse après `/ownership`. Réponds avec `/ownership` suivi de tes réponses numérotées, par exemple :'
+    (max === 1
+      ? 'Tu as déjà répondu à ce quiz, ton résultat reste'
+      : `Tu as utilisé tes ${max} essais sur ce quiz, ton meilleur résultat reste`) +
+    ` : **${badge}**. Bon vent ! ⛵`
+}
+
+export function formatTexts(messages: Messages, format: QuizFormat): FormatTexts {
+  return format === 'multiple-choice' ? messages.choice : messages.open
 }
 
 const CATALOG: Record<string, Messages> = { en, fr }

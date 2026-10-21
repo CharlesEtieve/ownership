@@ -1,8 +1,8 @@
 import * as core from '@actions/core'
 import { DEAD_RECKONING_LABEL, isBetter, RANK_LABELS, rankFor } from '../badges.js'
 import { modelLabel } from '../config.js'
-import { isOwnershipCommand, parseAnswers } from '../comment/answers.js'
-import { messagesFor } from '../comment/i18n.js'
+import { isOwnershipCommand, parseAnswers, parseChoiceAnswers } from '../comment/answers.js'
+import { formatTexts, messagesFor } from '../comment/i18n.js'
 import {
   rankName,
   renderAnswerTemplate,
@@ -10,7 +10,7 @@ import {
   renderQuizComment,
   sanitize
 } from '../comment/render.js'
-import { RANKS, type QuizResult, type QuizState } from '../comment/state.js'
+import { formatOf, RANKS, type QuizResult, type QuizState } from '../comment/state.js'
 import { findQuizComment, isBotAccount } from '../github.js'
 import { evaluationRequest } from '../llm/prompts.js'
 import { completeJson } from '../llm/provider.js'
@@ -53,21 +53,32 @@ export async function handleIssueComment(event: IssueCommentEvent, deps: Deps): 
 
   const messages = messagesFor(config.language)
   const { state } = existing
+  const format = formatOf(state)
   const bestRankName = state.result ? rankName(state.result.rank) : RANK_LABELS.deckhand.name
+  // The debrief reveals the right options, so a multiple-choice quiz is answered once.
+  const maxAttempts = format === 'multiple-choice' ? 1 : config.maxAttempts
 
-  if (state.attempts >= config.maxAttempts) {
-    await gh.createComment(issue.number, messages.outOfAttempts(config.maxAttempts, bestRankName))
-    return skipped(`all ${config.maxAttempts} attempts were already used.`)
+  if (state.attempts >= maxAttempts) {
+    await gh.createComment(issue.number, messages.outOfAttempts(maxAttempts, bestRankName))
+    return skipped(
+      maxAttempts === 1
+        ? 'the quiz was already answered.'
+        : `all ${maxAttempts} attempts were already used.`
+    )
   }
 
-  const parsed = parseAnswers(
-    comment.body ?? '',
-    state.questions.map(q => q.id)
-  )
+  const body = comment.body ?? ''
+  const parsed =
+    format === 'multiple-choice'
+      ? parseChoiceAnswers(body, state.questions)
+      : parseAnswers(
+          body,
+          state.questions.map(q => q.id)
+        )
   if (parsed.empty) {
     await gh.createComment(
       issue.number,
-      `${messages.emptyAnswers}\n\n${renderAnswerTemplate(state, messages)}\n`
+      `${formatTexts(messages, format).emptyAnswers}\n\n${renderAnswerTemplate(state, messages)}\n`
     )
     return skipped('the /ownership comment contains no answers.')
   }
@@ -86,16 +97,21 @@ export async function handleIssueComment(event: IssueCommentEvent, deps: Deps): 
     language: config.language,
     nonce: deps.nonce()
   })
+  const optionCounts = parsed.choices
+    ? new Map(state.questions.map(q => [q.id, q.options?.length ?? 0]))
+    : undefined
   const { evaluations, summary } = await completeJson(
     deps.llm(),
     request,
     data =>
       validateEvaluation(
         data,
-        state.questions.map(q => q.id)
+        state.questions.map(q => q.id),
+        optionCounts
       ),
     'evaluation'
   )
+  if (parsed.choices) alignGrades(evaluations, parsed.choices)
 
   const grades = evaluations.map(evaluation => evaluation.grade)
   const attempt: QuizResult = {
@@ -125,12 +141,13 @@ export async function handleIssueComment(event: IssueCommentEvent, deps: Deps): 
       author: issue.user.login,
       messages,
       evaluations,
+      choices: parsed.choices,
       summary,
       attemptRank: attempt.rank,
       bestRank: best.rank,
       improved,
       deadReckoning: attempt.deadReckoning,
-      maxAttempts: config.maxAttempts
+      maxAttempts
     })
   )
   if (improved) next.result = { ...best, debriefUrl: debrief.html_url }
@@ -142,7 +159,7 @@ export async function handleIssueComment(event: IssueCommentEvent, deps: Deps): 
       author: issue.user.login,
       messages,
       modelLabel: modelLabel(config),
-      maxAttempts: config.maxAttempts
+      maxAttempts
     })
   )
 
@@ -163,6 +180,19 @@ export async function handleIssueComment(event: IssueCommentEvent, deps: Deps): 
     kind: 'evaluated',
     rank: best.rank,
     summary: evaluationSummary(issue.number, next, evaluations, attempt, best, debrief.html_url)
+  }
+}
+
+/**
+ * A pick is right or wrong, whatever the model's wording: a right pick is solid, and a wrong pick is
+ * at best partial (when the author's reason shows understanding).
+ */
+function alignGrades(evaluations: Evaluation[], choices: ReadonlyMap<number, string>): void {
+  for (const evaluation of evaluations) {
+    const picked = choices.get(evaluation.id)
+    if (!picked || !evaluation.correct) continue
+    if (picked === evaluation.correct) evaluation.grade = 'solid'
+    else if (evaluation.grade === 'solid') evaluation.grade = 'partial'
   }
 }
 

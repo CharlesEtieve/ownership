@@ -12,6 +12,7 @@ describe('quizRequest', () => {
     description: '',
     diff,
     count: 2,
+    format: 'open',
     language: 'fr',
     nonce: 'n0nce'
   })
