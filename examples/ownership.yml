@@ -5,7 +5,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   issue_comment:
-    types: [created]
+    types: [created, edited]
 
 # Minimal permissions: read the PR, write the quiz comment and the badge labels.
 permissions:
@@ -21,10 +21,16 @@ concurrency:
 
 jobs:
   ownership:
-    # Skip comments that are not OwnerShip answers without starting the action.
+    # Start the action only for OwnerShip answers: a "/ownership" comment, or the PR author
+    # ticking "Done" in the quiz comment. Other comments and clicks are skipped for free.
     if: >-
       github.event_name == 'pull_request' ||
-      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/ownership'))
+      (github.event.issue.pull_request && github.event.action == 'created' &&
+        startsWith(github.event.comment.body, '/ownership')) ||
+      (github.event.issue.pull_request && github.event.action == 'edited' &&
+        github.event.comment.user.type == 'Bot' &&
+        github.event.sender.login == github.event.issue.user.login &&
+        contains(github.event.comment.body, '- [x] ✅'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

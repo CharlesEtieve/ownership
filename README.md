@@ -13,7 +13,7 @@ More and more code is written with AI. That is great, as long as the humans who 
 ## How it works
 
 1. **A PR is opened** (or marked ready for review). OwnerShip reads the diff, skips the noise (lockfiles, build output, generated code), and asks your model for questions about the _why_ and the _consequences_ of the change. Never trivia.
-2. **The author answers** in a comment that starts with `/ownership` and their picks, like `/ownership 1B 2A 3D`, whenever they like.
+2. **The author answers** by ticking one box per question in the quiz comment, then **✅ Done**, whenever they like.
 3. **OwnerShip debriefs**: every pick gets friendly feedback and an explanation of why the right option is right. The PR gets a badge label.
 
 Prefer answers in the author's own words? Set `format: open`: answers are then a few sentences each, graded `solid`, `partial` or `missing`, and the author can try again to aim higher.
@@ -29,7 +29,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   issue_comment:
-    types: [created]
+    types: [created, edited]
 
 permissions:
   contents: read
@@ -44,7 +44,12 @@ jobs:
   ownership:
     if: >-
       github.event_name == 'pull_request' ||
-      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/ownership'))
+      (github.event.issue.pull_request && github.event.action == 'created' &&
+        startsWith(github.event.comment.body, '/ownership')) ||
+      (github.event.issue.pull_request && github.event.action == 'edited' &&
+        github.event.comment.user.type == 'Bot' &&
+        github.event.sender.login == github.event.issue.user.login &&
+        contains(github.event.comment.body, '- [x] ✅'))
     runs-on: ubuntu-latest
     steps:
       - uses: CharlesEtieve/ownership@v1
@@ -58,7 +63,9 @@ That's it. Open a pull request and the quiz appears as a comment. More examples 
 
 ## Answering a quiz
 
-Each question comes with four options, one of them right. Reply to the PR with a comment that starts with `/ownership` and your picks:
+Each question comes with four options, one of them right. Tick one box per question directly in the quiz comment, then tick **✅ Done, grade my answers**. Nothing is graded before that, so you can change your mind; a push in the meantime keeps your ticks.
+
+Ticking boxes in someone else's comment needs write access to the repository, which PR authors usually have. Without it, reply to the PR with a comment instead:
 
 ```text
 /ownership 1B 2A 3D
@@ -75,7 +82,7 @@ Or one per line, with an optional reason after a letter (a sound reason can earn
 - [x] ⚓ Dead Reckoning: I answered without AI help
 ```
 
-- Only the PR author's answers are evaluated.
+- Only the PR author's answers are evaluated, and only the author's tick on **Done** starts the grading.
 - A multiple-choice quiz is answered once: the debrief reveals the right options, so a second try would not tell you much.
 - Tick **Dead Reckoning** if you answered from your own understanding. It is on your honour, and optional.
 
@@ -203,7 +210,7 @@ One model call per quiz and one per answer, each with roughly 10k input tokens a
 Questions and feedback can be written in any language your model speaks (`language: de`, `language: ja`...). The fixed interface texts (instructions, status) are available in English and French, with English as the fallback.
 
 **Why does the workflow have an `if:`?**
-`issue_comment` fires for every comment in the repository. The `if:` keeps runners from starting for comments that are not `/ownership` answers.
+`issue_comment` fires for every comment in the repository, and every click on a box edits the quiz comment. The `if:` keeps runners from starting unless someone posts an `/ownership` answer or the PR author ticks **✅ Done**. If your workflow only listens to `types: [created]`, `/ownership` answers still work but ticked boxes are ignored.
 
 **Where do the results go?**
 In GitHub only: the quiz comment, the debrief comment, labels on the PR and the job summary. Nothing else.

@@ -1,4 +1,5 @@
 import { countGrade, DEAD_RECKONING_LABEL, RANK_LABELS } from '../badges.js'
+import { DEAD_RECKONING_MARKER, pickMarker, SUBMIT_MARKER } from './answers.js'
 import { formatTexts, type Messages } from './i18n.js'
 import {
   encodeState,
@@ -82,6 +83,8 @@ export function renderQuizComment({
   const lines: string[] = [encodeState(state), '', `## ${m.quizTitle}`, '']
   lines.push(m.quizIntro(author, state.questions.length), '')
 
+  const choice = formatOf(state) === 'multiple-choice'
+  const pending = state.status === 'pending'
   for (const question of state.questions) {
     lines.push(`**${question.id}. ${sanitize(question.text)}**`)
     const files = question.files.slice(0, 3).map(inlineCode).join(', ')
@@ -89,14 +92,32 @@ export function renderQuizComment({
     if (question.options) {
       for (const letter of OPTION_LETTERS) {
         const line = optionLine(question, letter)
-        if (line) lines.push(`- ${line}`)
+        // While the quiz is open, options are checkboxes the author ticks in place.
+        if (line && pending) lines.push(`- [ ] ${line} ${pickMarker(question.id, letter)}`)
+        else if (line) lines.push(`- ${line}`)
       }
       lines.push('')
     }
   }
 
-  lines.push(`### ${m.howToAnswerTitle}`, '', f.howToAnswer, '', renderAnswerTemplate(state, m), '')
-  lines.push(`<sub>${m.deadReckoningHint}</sub>`, '')
+  if (choice && pending) {
+    lines.push(`### ${m.howToAnswerTitle}`, '', f.howToAnswer, '')
+    lines.push(`- [ ] ${m.deadReckoningLine} ${DEAD_RECKONING_MARKER}`)
+    lines.push(`- [ ] ✅ ${m.submitLine} ${SUBMIT_MARKER}`, '')
+    lines.push(`<sub>${m.deadReckoningHint}</sub>`, '')
+    lines.push(`<details><summary>${m.cantTickTitle}</summary>`, '', m.cantTick, '')
+    lines.push(renderAnswerTemplate(state, m), '', '</details>', '')
+  } else if (!choice) {
+    lines.push(
+      `### ${m.howToAnswerTitle}`,
+      '',
+      f.howToAnswer,
+      '',
+      renderAnswerTemplate(state, m),
+      ''
+    )
+    lines.push(`<sub>${m.deadReckoningHint}</sub>`, '')
+  }
 
   lines.push(`<details><summary>${m.badgesTitle}</summary>`, '')
   for (const rank of RANKS) lines.push(`- **${RANK_LABELS[rank].name}**: ${f.rankRules[rank]}`)

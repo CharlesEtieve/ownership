@@ -1,8 +1,15 @@
 import * as core from '@actions/core'
 import { DEAD_RECKONING_LABEL, isBetter, RANK_LABELS, rankFor } from '../badges.js'
 import { modelLabel } from '../config.js'
-import { isOwnershipCommand, parseAnswers, parseChoiceAnswers } from '../comment/answers.js'
-import { formatTexts, messagesFor } from '../comment/i18n.js'
+import {
+  isOwnershipCommand,
+  parseAnswers,
+  parseChoiceAnswers,
+  parseTicks,
+  untickSubmit,
+  type ParsedAnswers
+} from '../comment/answers.js'
+import { formatTexts, messagesFor, type Messages } from '../comment/i18n.js'
 import {
   rankName,
   renderAnswerTemplate,
@@ -11,7 +18,7 @@ import {
   sanitize
 } from '../comment/render.js'
 import { formatOf, RANKS, type QuizResult, type QuizState } from '../comment/state.js'
-import { findQuizComment, isBotAccount } from '../github.js'
+import { findQuizComment, isBotAccount, type QuizComment } from '../github.js'
 import { evaluationRequest } from '../llm/prompts.js'
 import { completeJson } from '../llm/provider.js'
 import { validateEvaluation, type Evaluation } from '../llm/schemas.js'
@@ -31,12 +38,16 @@ export interface IssueCommentEvent {
     html_url: string
     user: { login: string; type: string }
   }
+  /** Who triggered the event: for "edited", the person who ticked a box. */
+  sender?: { login: string; type: string }
 }
 
 export async function handleIssueComment(event: IssueCommentEvent, deps: Deps): Promise<Outcome> {
   const { issue, comment } = event
-  if (event.action !== 'created' || !issue || !comment) return skipped('not a new comment.')
+  if (!issue || !comment) return skipped('the event has no comment.')
   if (!issue.pull_request) return skipped('the comment is on an issue, not a pull request.')
+  if (event.action === 'edited') return handleTicks(event, deps)
+  if (event.action !== 'created') return skipped(`comment action "${event.action}" is not handled.`)
   if (!isOwnershipCommand(comment.body))
     return skipped('the comment does not start with /ownership.')
   if (isBotAccount(comment.user)) return skipped('the comment was written by a bot.')
@@ -68,7 +79,7 @@ export async function handleIssueComment(event: IssueCommentEvent, deps: Deps): 
   }
 
   const body = comment.body ?? ''
-  const parsed =
+  const parsed: ParsedAnswers =
     format === 'multiple-choice'
       ? parseChoiceAnswers(body, state.questions)
       : parseAnswers(
@@ -86,6 +97,87 @@ export async function handleIssueComment(event: IssueCommentEvent, deps: Deps): 
   await gh.addReaction(comment.id, 'eyes').catch(error => {
     core.debug(`Could not add a reaction: ${String(error)}`)
   })
+  return grade(deps, {
+    number: issue.number,
+    author: issue.user.login,
+    existing,
+    parsed,
+    messages,
+    maxAttempts
+  })
+}
+
+/**
+ * Multiple-choice quizzes are answered by ticking boxes in the quiz comment. Each tick edits the
+ * comment; grading starts when the PR author ticks "Done".
+ */
+async function handleTicks(event: IssueCommentEvent, deps: Deps): Promise<Outcome> {
+  const issue = event.issue as NonNullable<IssueCommentEvent['issue']>
+  const comment = event.comment as NonNullable<IssueCommentEvent['comment']>
+  if (!isBotAccount(comment.user)) return skipped('the edited comment is not an OwnerShip quiz.')
+  if (event.sender?.login !== issue.user.login) {
+    return skipped(
+      `only the pull request author (@${issue.user.login}) can submit the quiz; ` +
+        `the edit by @${event.sender?.login ?? 'unknown'} is ignored.`
+    )
+  }
+
+  const { gh, config } = deps
+  const existing = findQuizComment(await gh.listComments(issue.number))
+  if (!existing || existing.comment.id !== comment.id) {
+    return skipped('the edited comment is not the OwnerShip quiz.')
+  }
+  const { state } = existing
+  if (formatOf(state) !== 'multiple-choice' || state.status !== 'pending') {
+    return skipped('the quiz is not waiting for ticked answers.')
+  }
+
+  // The freshest body, in case the author kept ticking while this run was queued.
+  const body = existing.comment.body
+  const ticks = parseTicks(body, state.questions)
+  if (!ticks.submitted) return skipped('"Done" is not ticked yet.')
+
+  const messages = messagesFor(config.language)
+  if (ticks.conflicts.length > 0 || ticks.empty) {
+    await gh.updateComment(existing.comment.id, untickSubmit(body))
+    await gh.createComment(
+      issue.number,
+      ticks.conflicts.length > 0
+        ? messages.conflicts(ticks.conflicts.join(', '))
+        : messages.nothingTicked
+    )
+    return skipped(
+      ticks.conflicts.length > 0
+        ? `several boxes ticked for question(s) ${ticks.conflicts.join(', ')}.`
+        : '"Done" was ticked without any option.'
+    )
+  }
+
+  return grade(deps, {
+    number: issue.number,
+    author: issue.user.login,
+    existing,
+    parsed: ticks,
+    messages,
+    maxAttempts: 1
+  })
+}
+
+interface GradeInput {
+  number: number
+  author: string
+  existing: QuizComment
+  parsed: ParsedAnswers
+  messages: Messages
+  maxAttempts: number
+}
+
+/** Grades one attempt, posts the debrief, updates the quiz, the labels and the status. */
+async function grade(deps: Deps, input: GradeInput): Promise<Outcome> {
+  const { gh, config } = deps
+  const { existing, parsed, messages, maxAttempts, author } = input
+  const { state } = existing
+  const issue = { number: input.number, user: { login: author } }
 
   const pr = await gh.getPullRequest(issue.number)
   const { digest } = await loadDiff(gh, issue.number, config)

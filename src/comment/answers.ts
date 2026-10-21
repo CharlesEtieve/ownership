@@ -39,6 +39,90 @@ const ONLY_LETTERS = new RegExp(`^[${SEPARATORS}]*(?:[a-d][${SEPARATORS}]*)+$`, 
 /** The letter opening a numbered answer, optionally followed by a reason: "B", "(b)", "B. because...". */
 const LEADING_LETTER = /^\(?([a-z])\)?(?=$|[\s.,:;)\-–—])[\s.,:;)\-–—]*/i
 
+/**
+ * Hidden markers at the end of the checkbox lines of a multiple-choice quiz comment. Model text cannot
+ * forge them: sanitize() escapes "<" outside code spans and breaks "<!--" inside them.
+ */
+export const pickMarker = (id: number, letter: OptionLetter): string =>
+  `<!-- ownership:pick ${id} ${letter} -->`
+export const SUBMIT_MARKER = '<!-- ownership:submit -->'
+export const DEAD_RECKONING_MARKER = '<!-- ownership:dead-reckoning -->'
+const TICK_LINE =
+  /^\s*[-*+]\s+\[([ xX])\].*(<!-- ownership:(?:pick (\d{1,2}) ([A-D])|submit|dead-reckoning) -->)\s*$/
+
+export interface TickedAnswers extends ParsedAnswers {
+  /** The author ticked "Done". */
+  submitted: boolean
+  /** Questions with more than one box ticked. */
+  conflicts: number[]
+}
+
+/** Reads the boxes ticked in the quiz comment itself. */
+export function parseTicks(
+  body: string,
+  questions: readonly { id: number; options?: readonly string[] | undefined }[]
+): TickedAnswers {
+  const ticked = new Map<number, OptionLetter[]>()
+  let submitted = false
+  let deadReckoning = false
+  for (const line of body.replace(/\r\n?/g, '\n').split('\n')) {
+    const match = TICK_LINE.exec(line)
+    if (!match || match[1] === ' ') continue
+    if (match[2] === SUBMIT_MARKER) submitted = true
+    else if (match[2] === DEAD_RECKONING_MARKER) deadReckoning = true
+    else {
+      const id = Number(match[3])
+      ticked.set(id, [...(ticked.get(id) ?? []), match[4] as OptionLetter])
+    }
+  }
+
+  const choices = new Map<number, OptionLetter>()
+  const conflicts: number[] = []
+  for (const question of questions) {
+    const letters = (ticked.get(question.id) ?? []).filter(
+      letter => OPTION_LETTERS.indexOf(letter) < (question.options?.length ?? 0)
+    )
+    if (letters.length > 1) conflicts.push(question.id)
+    else if (letters[0]) choices.set(question.id, letters[0])
+  }
+  return {
+    answers: new Map(),
+    choices,
+    deadReckoning,
+    empty: choices.size === 0,
+    submitted,
+    conflicts
+  }
+}
+
+/** Unticks "Done" in a quiz comment body, keeping the other boxes as the author left them. */
+export function untickSubmit(body: string): string {
+  return body
+    .split('\n')
+    .map(line => (line.includes(SUBMIT_MARKER) ? line.replace(/\[[xX]\]/, '[ ]') : line))
+    .join('\n')
+}
+
+/**
+ * Copies the author's ticks (options and Dead Reckoning, never "Done") from the current quiz comment to
+ * a re-rendered one, so a push does not wipe answers in progress. Only valid when the questions did not
+ * change.
+ */
+export function carryTicks(previous: string, next: string): string {
+  const ticked = new Set<string>()
+  for (const line of previous.split('\n')) {
+    const match = TICK_LINE.exec(line)
+    if (match && match[1] !== ' ' && match[2] !== SUBMIT_MARKER) ticked.add(match[2] as string)
+  }
+  return next
+    .split('\n')
+    .map(line => {
+      const match = TICK_LINE.exec(line)
+      return match && ticked.has(match[2] as string) ? line.replace('[ ]', '[x]') : line
+    })
+    .join('\n')
+}
+
 /** Whether a comment is an OwnerShip answer: its first line starts with "/ownership". */
 export function isOwnershipCommand(body: string | undefined | null): boolean {
   return !!body && COMMAND.test(body)

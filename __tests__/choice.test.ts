@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { parseChoiceAnswers } from '../src/comment/answers.js'
+import {
+  carryTicks,
+  parseChoiceAnswers,
+  parseTicks,
+  pickMarker,
+  SUBMIT_MARKER,
+  untickSubmit
+} from '../src/comment/answers.js'
 import { decodeState, encodeState, type QuizState } from '../src/comment/state.js'
 import { readConfig } from '../src/config.js'
 import { filterFiles } from '../src/diff/filter.js'
 import { buildDiff } from '../src/diff/budget.js'
 import { handleIssueComment, type IssueCommentEvent } from '../src/handlers/answer.js'
-import { handlePullRequest, placeAnswer } from '../src/handlers/quiz.js'
+import { handlePullRequest, placeAnswer, type PullRequestEvent } from '../src/handlers/quiz.js'
 import { evaluationRequest, quizRequest } from '../src/llm/prompts.js'
 import { SchemaError, validateEvaluation, validateQuiz } from '../src/llm/schemas.js'
 import {
@@ -22,6 +29,90 @@ vi.mock('@actions/core', () => import('./support/core-mock.js'))
 
 const OPTIONS = ['one', 'two', 'three', 'four']
 const QUESTIONS = [1, 2, 3].map(id => ({ id, options: OPTIONS }))
+
+/** Ticks the boxes whose line ends with one of these markers, like a click in GitHub would. */
+function tick(body: string, ...markers: string[]): string {
+  return body
+    .split('\n')
+    .map(line => (markers.some(m => line.endsWith(m)) ? line.replace('- [ ]', '- [x]') : line))
+    .join('\n')
+}
+
+describe('checkbox answers', () => {
+  const body = [
+    '**1. Why?**',
+    `- [ ] **A.** one ${pickMarker(1, 'A')}`,
+    `- [ ] **B.** two ${pickMarker(1, 'B')}`,
+    '**2. What?**',
+    `- [ ] **A.** one ${pickMarker(2, 'A')}`,
+    `- [ ] **B.** two ${pickMarker(2, 'B')}`,
+    `- [ ] **D.** four ${pickMarker(3, 'D')}`,
+    '- [ ] ⚓ Dead Reckoning <!-- ownership:dead-reckoning -->',
+    `- [ ] ✅ Done ${SUBMIT_MARKER}`,
+    // Not ours: no marker, or a marker in the middle of the line.
+    '- [x] **A.** fake',
+    `- [x] text ${pickMarker(3, 'A')} more`
+  ].join('\n')
+
+  it('reads one pick per question, Dead Reckoning and Done', () => {
+    const ticked = tick(
+      body,
+      pickMarker(1, 'B'),
+      pickMarker(2, 'A'),
+      '<!-- ownership:dead-reckoning -->',
+      SUBMIT_MARKER
+    )
+    const parsed = parseTicks(ticked, QUESTIONS)
+    expect([...(parsed.choices ?? new Map())]).toEqual([
+      [1, 'B'],
+      [2, 'A']
+    ])
+    expect(parsed).toMatchObject({
+      submitted: true,
+      deadReckoning: true,
+      conflicts: [],
+      empty: false
+    })
+  })
+
+  it('reports questions with several boxes ticked', () => {
+    const parsed = parseTicks(
+      tick(body, pickMarker(2, 'A'), pickMarker(2, 'B'), pickMarker(3, 'D')),
+      QUESTIONS
+    )
+    expect(parsed.conflicts).toEqual([2])
+    expect(parsed.choices?.get(3)).toBe('D')
+    expect(parsed.submitted).toBe(false)
+  })
+
+  it('is empty when nothing is ticked', () => {
+    expect(parseTicks(tick(body, SUBMIT_MARKER), QUESTIONS)).toMatchObject({
+      empty: true,
+      submitted: true
+    })
+  })
+
+  it('unticks Done only', () => {
+    const ticked = tick(body, pickMarker(1, 'A'), SUBMIT_MARKER)
+    const reset = untickSubmit(ticked)
+    expect(reset).toContain(`- [ ] ✅ Done ${SUBMIT_MARKER}`)
+    expect(reset).toContain(`- [x] **A.** one ${pickMarker(1, 'A')}`)
+  })
+
+  it('carries ticks, but not Done, to a re-rendered comment', () => {
+    const ticked = tick(
+      body,
+      pickMarker(1, 'A'),
+      '<!-- ownership:dead-reckoning -->',
+      SUBMIT_MARKER
+    )
+    const carried = carryTicks(ticked, body)
+    expect(carried).toContain(`- [x] **A.** one ${pickMarker(1, 'A')}`)
+    expect(carried).toContain('- [x] ⚓ Dead Reckoning')
+    expect(carried).toContain(`- [ ] ✅ Done ${SUBMIT_MARKER}`)
+    expect(carried).toContain(`- [ ] **B.** two ${pickMarker(1, 'B')}`)
+  })
+})
 
 describe('format input', () => {
   it('defaults to multiple-choice and accepts open', () => {
@@ -255,7 +346,12 @@ describe('multiple-choice quiz, end to end', () => {
     const state = decodeState(body)
     expect(state?.format).toBe('multiple-choice')
     expect(state?.questions[0]?.options).toHaveLength(4)
-    expect(body).toMatch(/- \*\*A\.\*\* (Right|Wrong) 1/)
+    expect(body).toMatch(
+      /^- \[ \] \*\*A\.\*\* (Right 1|Wrong 1[abc]) <!-- ownership:pick 1 A -->$/m
+    )
+    expect(body).toContain('- [ ] ✅ Done, grade my answers <!-- ownership:submit -->')
+    expect(body).toContain('<!-- ownership:dead-reckoning -->')
+    // Fallback for people who cannot tick boxes.
     expect(body).toContain('/ownership 1B 2A 3D')
     expect(body).toContain('1. ?\n2. ?\n3. ?')
     expect(body).not.toMatch(/"answer"/)
@@ -299,5 +395,105 @@ describe('multiple-choice quiz, end to end', () => {
     expect(outcome.kind).toBe('skipped')
     expect(gh.botReplies()[0]?.body).toContain('I could not find any letters')
     expect(llm.requests).toHaveLength(1)
+  })
+  describe('ticking boxes in the quiz comment', () => {
+    const edit = (body: string, sender = AUTHOR): IssueCommentEvent => {
+      const quiz = gh.quizComments()[0]
+      if (!quiz) throw new Error('no quiz')
+      quiz.body = body
+      return {
+        action: 'edited',
+        issue: { number: 7, user: AUTHOR, pull_request: {} },
+        comment: { id: quiz.id, body, html_url: quiz.html_url, user: quiz.user ?? AUTHOR },
+        sender
+      }
+    }
+    const quizBody = (): string => gh.quizComments()[0]?.body ?? ''
+
+    it('grades when the author ticks Done', async () => {
+      const state = decodeState(quizBody())
+      const right = [1, 2, 3].map(id => rightLetter(state, id))
+      const picks = [1, 2, 3].map(id => pickMarker(id, right[id - 1] as 'A'))
+      llm.push(choiceEvaluationReply(right, ['solid', 'solid', 'solid']))
+
+      // A tick without Done does nothing.
+      expect(
+        (await handleIssueComment(edit(tick(quizBody(), picks[0] as string)), deps())).kind
+      ).toBe('skipped')
+      const outcome = await handleIssueComment(
+        edit(tick(quizBody(), ...picks, '<!-- ownership:dead-reckoning -->', SUBMIT_MARKER)),
+        deps()
+      )
+
+      expect(outcome).toMatchObject({ kind: 'evaluated', rank: 'captain' })
+      expect(gh.labels).toEqual(new Set(['🏴‍☠️ Captain', '🗺️ Dead Reckoning']))
+      expect(gh.botReplies()[0]?.body).toContain(`You picked **${right[0]}.** Right 1`)
+      // Once graded, the options are no longer boxes and there is nothing left to tick.
+      expect(quizBody()).not.toContain('- [ ]')
+      expect(quizBody()).not.toContain('- [x]')
+      expect(quizBody()).toMatch(/^- \*\*A\.\*\* /m)
+      expect(decodeState(quizBody())?.status).toBe('evaluated')
+    })
+
+    it('ignores Done ticked by someone else', async () => {
+      const outcome = await handleIssueComment(
+        edit(tick(quizBody(), pickMarker(1, 'A'), SUBMIT_MARKER), {
+          login: 'reviewer',
+          type: 'User'
+        }),
+        deps()
+      )
+      expect(outcome.summary).toContain('only the pull request author')
+      expect(llm.requests).toHaveLength(1)
+    })
+
+    it('ignores edits of other comments', async () => {
+      const other = await gh.createComment(7, `- [x] ✅ Done ${SUBMIT_MARKER}`)
+      const outcome = await handleIssueComment(
+        {
+          action: 'edited',
+          issue: { number: 7, user: AUTHOR, pull_request: {} },
+          comment: { ...other, user: other.user ?? AUTHOR },
+          sender: AUTHOR
+        },
+        deps()
+      )
+      expect(outcome.summary).toContain('not the OwnerShip quiz')
+    })
+
+    it('asks to fix questions with two boxes ticked, and unticks Done', async () => {
+      const outcome = await handleIssueComment(
+        edit(tick(quizBody(), pickMarker(2, 'A'), pickMarker(2, 'C'), SUBMIT_MARKER)),
+        deps()
+      )
+      expect(outcome.kind).toBe('skipped')
+      expect(gh.botReplies()[0]?.body).toContain('More than one box is ticked for question 2')
+      expect(quizBody()).toContain(`- [ ] ✅ Done, grade my answers ${SUBMIT_MARKER}`)
+      expect(quizBody()).toContain(`- [x] `)
+      expect(llm.requests).toHaveLength(1)
+    })
+
+    it('asks for at least one pick when Done is ticked alone', async () => {
+      await handleIssueComment(edit(tick(quizBody(), SUBMIT_MARKER)), deps())
+      expect(gh.botReplies()[0]?.body).toContain('No option is ticked yet')
+      expect(quizBody()).not.toContain('- [x]')
+    })
+
+    it('keeps ticks in progress when a push re-renders the quiz', async () => {
+      edit(tick(quizBody(), pickMarker(1, 'C')))
+      const push: PullRequestEvent = {
+        action: 'synchronize',
+        pull_request: {
+          number: 7,
+          title: 'Add retries',
+          user: AUTHOR,
+          head: { sha: 'bbbbbbb2222222', repo: { full_name: 'acme/app' } },
+          base: { repo: { full_name: 'acme/app' } }
+        }
+      }
+      expect((await handlePullRequest(push, deps())).kind).toBe('quiz-updated')
+      expect(quizBody()).toContain(`- [x] **C.**`)
+      expect(quizBody()).toContain('bbbbbbb')
+    })
   })
 })

@@ -20,6 +20,11 @@ export interface Messages {
   howToAnswerTitle: string
   deadReckoningLine: string
   deadReckoningHint: string
+  submitLine: string
+  cantTickTitle: string
+  cantTick: string
+  conflicts: (ids: string) => string
+  nothingTicked: string
   badgesTitle: string
   deadReckoningRule: string
   statusPending: string
@@ -61,8 +66,7 @@ const en: Messages = {
   },
   choice: {
     howToAnswer:
-      'Reply to this PR with a comment that starts with `/ownership` and the letter you pick for each question. ' +
-      'You can add a short reason after a letter if you like. The quick form `/ownership 1B 2A 3D` works too:',
+      'Tick one box per question, then tick **✅ Done** below. Nothing is graded before that, so you can change your mind.',
     answerPlaceholder: '?',
     emptyAnswers:
       'I could not find any letters after `/ownership`. Reply with `/ownership` followed by your picks, for example:',
@@ -90,7 +94,14 @@ const en: Messages = {
   howToAnswerTitle: 'How to answer',
   deadReckoningLine: '⚓ Dead Reckoning: I answered without AI help',
   deadReckoningHint:
-    'Change `[ ]` to `[x]` if you answered from your own understanding, without asking an AI. It is on your honour, and optional.',
+    'Tick **Dead Reckoning** if you answered from your own understanding, without asking an AI. It is on your honour, and optional.',
+  submitLine: 'Done, grade my answers',
+  cantTickTitle: 'Can’t tick the boxes?',
+  cantTick:
+    'Ticking boxes in this comment needs write access to the repository. Reply to the PR instead, with one letter per question in order (`/ownership 1B 2A 3D`), or one per line with an optional reason:',
+  conflicts: ids =>
+    `More than one box is ticked for question ${ids}. Keep one per question, then tick **✅ Done** again.`,
+  nothingTicked: 'No option is ticked yet. Tick one box per question, then tick **✅ Done** again.',
   badgesTitle: 'Badges you can earn',
   deadReckoningRule: 'you answered without AI help (on honour)',
   statusPending: '⏳ **Status:** waiting for your answers.',
@@ -141,8 +152,7 @@ const fr: Messages = {
   },
   choice: {
     howToAnswer:
-      'Réponds sur cette PR avec un commentaire qui commence par `/ownership` et la lettre que tu choisis pour chaque question. ' +
-      'Tu peux ajouter une courte justification après une lettre si tu veux. La forme rapide `/ownership 1B 2A 3D` marche aussi :',
+      'Coche une case par question, puis coche **✅ Terminé** ci-dessous. Rien n’est corrigé avant, tu peux donc changer d’avis.',
     answerPlaceholder: '?',
     emptyAnswers:
       'Je n’ai trouvé aucune lettre après `/ownership`. Réponds avec `/ownership` suivi de tes choix, par exemple :',
@@ -170,7 +180,15 @@ const fr: Messages = {
   howToAnswerTitle: 'Comment répondre',
   deadReckoningLine: '⚓ Dead Reckoning : j’ai répondu sans aide d’une IA',
   deadReckoningHint:
-    'Remplace `[ ]` par `[x]` si tu as répondu avec ta propre compréhension, sans demander à une IA. C’est sur l’honneur, et facultatif.',
+    'Coche **Dead Reckoning** si tu as répondu avec ta propre compréhension, sans demander à une IA. C’est sur l’honneur, et facultatif.',
+  submitLine: 'Terminé, corrige mes réponses',
+  cantTickTitle: 'Impossible de cocher les cases ?',
+  cantTick:
+    'Cocher les cases de ce commentaire demande un accès en écriture au dépôt. Réponds plutôt sur la PR, avec une lettre par question dans l’ordre (`/ownership 1B 2A 3D`), ou une par ligne avec une justification facultative :',
+  conflicts: ids =>
+    `Plus d’une case est cochée pour la question ${ids}. Garde-en une par question, puis coche à nouveau **✅ Terminé**.`,
+  nothingTicked:
+    'Aucune option n’est encore cochée. Coche une case par question, puis coche à nouveau **✅ Terminé**.',
   badgesTitle: 'Badges à gagner',
   deadReckoningRule: 'tu as répondu sans aide d’une IA (sur l’honneur)',
   statusPending: '⏳ **Statut :** en attente de tes réponses.',

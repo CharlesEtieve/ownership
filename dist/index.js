@@ -34733,6 +34733,77 @@ const PAIR = /(\d{1,2})\s*[-.:)=]?\s*\(?([a-z])\)?(?![a-z])/gi;
 const ONLY_LETTERS = new RegExp(`^[${SEPARATORS}]*(?:[a-d][${SEPARATORS}]*)+$`, 'i');
 /** The letter opening a numbered answer, optionally followed by a reason: "B", "(b)", "B. because...". */
 const LEADING_LETTER = /^\(?([a-z])\)?(?=$|[\s.,:;)\-–—])[\s.,:;)\-–—]*/i;
+/**
+ * Hidden markers at the end of the checkbox lines of a multiple-choice quiz comment. Model text cannot
+ * forge them: sanitize() escapes "<" outside code spans and breaks "<!--" inside them.
+ */
+const pickMarker = (id, letter) => `<!-- ownership:pick ${id} ${letter} -->`;
+const SUBMIT_MARKER = '<!-- ownership:submit -->';
+const DEAD_RECKONING_MARKER = '<!-- ownership:dead-reckoning -->';
+const TICK_LINE = /^\s*[-*+]\s+\[([ xX])\].*(<!-- ownership:(?:pick (\d{1,2}) ([A-D])|submit|dead-reckoning) -->)\s*$/;
+/** Reads the boxes ticked in the quiz comment itself. */
+function parseTicks(body, questions) {
+    const ticked = new Map();
+    let submitted = false;
+    let deadReckoning = false;
+    for (const line of body.replace(/\r\n?/g, '\n').split('\n')) {
+        const match = TICK_LINE.exec(line);
+        if (!match || match[1] === ' ')
+            continue;
+        if (match[2] === SUBMIT_MARKER)
+            submitted = true;
+        else if (match[2] === DEAD_RECKONING_MARKER)
+            deadReckoning = true;
+        else {
+            const id = Number(match[3]);
+            ticked.set(id, [...(ticked.get(id) ?? []), match[4]]);
+        }
+    }
+    const choices = new Map();
+    const conflicts = [];
+    for (const question of questions) {
+        const letters = (ticked.get(question.id) ?? []).filter(letter => OPTION_LETTERS.indexOf(letter) < (question.options?.length ?? 0));
+        if (letters.length > 1)
+            conflicts.push(question.id);
+        else if (letters[0])
+            choices.set(question.id, letters[0]);
+    }
+    return {
+        answers: new Map(),
+        choices,
+        deadReckoning,
+        empty: choices.size === 0,
+        submitted,
+        conflicts
+    };
+}
+/** Unticks "Done" in a quiz comment body, keeping the other boxes as the author left them. */
+function untickSubmit(body) {
+    return body
+        .split('\n')
+        .map(line => (line.includes(SUBMIT_MARKER) ? line.replace(/\[[xX]\]/, '[ ]') : line))
+        .join('\n');
+}
+/**
+ * Copies the author's ticks (options and Dead Reckoning, never "Done") from the current quiz comment to
+ * a re-rendered one, so a push does not wipe answers in progress. Only valid when the questions did not
+ * change.
+ */
+function carryTicks(previous, next) {
+    const ticked = new Set();
+    for (const line of previous.split('\n')) {
+        const match = TICK_LINE.exec(line);
+        if (match && match[1] !== ' ' && match[2] !== SUBMIT_MARKER)
+            ticked.add(match[2]);
+    }
+    return next
+        .split('\n')
+        .map(line => {
+        const match = TICK_LINE.exec(line);
+        return match && ticked.has(match[2]) ? line.replace('[ ]', '[x]') : line;
+    })
+        .join('\n');
+}
 /** Whether a comment is an OwnerShip answer: its first line starts with "/ownership". */
 function isOwnershipCommand(body) {
     return !!body && COMMAND.test(body);
@@ -34874,8 +34945,7 @@ const en = {
         score: (solid, total) => `${solid}/${total} solid`
     },
     choice: {
-        howToAnswer: 'Reply to this PR with a comment that starts with `/ownership` and the letter you pick for each question. ' +
-            'You can add a short reason after a letter if you like. The quick form `/ownership 1B 2A 3D` works too:',
+        howToAnswer: 'Tick one box per question, then tick **✅ Done** below. Nothing is graded before that, so you can change your mind.',
         answerPlaceholder: '?',
         emptyAnswers: 'I could not find any letters after `/ownership`. Reply with `/ownership` followed by your picks, for example:',
         grades: { solid: '🟢 Right', partial: '🟡 Close', missing: '⚪ Not quite' },
@@ -34900,7 +34970,12 @@ const en = {
     },
     howToAnswerTitle: 'How to answer',
     deadReckoningLine: '⚓ Dead Reckoning: I answered without AI help',
-    deadReckoningHint: 'Change `[ ]` to `[x]` if you answered from your own understanding, without asking an AI. It is on your honour, and optional.',
+    deadReckoningHint: 'Tick **Dead Reckoning** if you answered from your own understanding, without asking an AI. It is on your honour, and optional.',
+    submitLine: 'Done, grade my answers',
+    cantTickTitle: 'Can’t tick the boxes?',
+    cantTick: 'Ticking boxes in this comment needs write access to the repository. Reply to the PR instead, with one letter per question in order (`/ownership 1B 2A 3D`), or one per line with an optional reason:',
+    conflicts: ids => `More than one box is ticked for question ${ids}. Keep one per question, then tick **✅ Done** again.`,
+    nothingTicked: 'No option is ticked yet. Tick one box per question, then tick **✅ Done** again.',
     badgesTitle: 'Badges you can earn',
     deadReckoningRule: 'you answered without AI help (on honour)',
     statusPending: '⏳ **Status:** waiting for your answers.',
@@ -34942,8 +35017,7 @@ const fr = {
         score: (solid, total) => `${solid}/${total} solides`
     },
     choice: {
-        howToAnswer: 'Réponds sur cette PR avec un commentaire qui commence par `/ownership` et la lettre que tu choisis pour chaque question. ' +
-            'Tu peux ajouter une courte justification après une lettre si tu veux. La forme rapide `/ownership 1B 2A 3D` marche aussi :',
+        howToAnswer: 'Coche une case par question, puis coche **✅ Terminé** ci-dessous. Rien n’est corrigé avant, tu peux donc changer d’avis.',
         answerPlaceholder: '?',
         emptyAnswers: 'Je n’ai trouvé aucune lettre après `/ownership`. Réponds avec `/ownership` suivi de tes choix, par exemple :',
         grades: { solid: '🟢 Juste', partial: '🟡 Presque', missing: '⚪ Pas tout à fait' },
@@ -34968,7 +35042,12 @@ const fr = {
     },
     howToAnswerTitle: 'Comment répondre',
     deadReckoningLine: '⚓ Dead Reckoning : j’ai répondu sans aide d’une IA',
-    deadReckoningHint: 'Remplace `[ ]` par `[x]` si tu as répondu avec ta propre compréhension, sans demander à une IA. C’est sur l’honneur, et facultatif.',
+    deadReckoningHint: 'Coche **Dead Reckoning** si tu as répondu avec ta propre compréhension, sans demander à une IA. C’est sur l’honneur, et facultatif.',
+    submitLine: 'Terminé, corrige mes réponses',
+    cantTickTitle: 'Impossible de cocher les cases ?',
+    cantTick: 'Cocher les cases de ce commentaire demande un accès en écriture au dépôt. Réponds plutôt sur la PR, avec une lettre par question dans l’ordre (`/ownership 1B 2A 3D`), ou une par ligne avec une justification facultative :',
+    conflicts: ids => `Plus d’une case est cochée pour la question ${ids}. Garde-en une par question, puis coche à nouveau **✅ Terminé**.`,
+    nothingTicked: 'Aucune option n’est encore cochée. Coche une case par question, puis coche à nouveau **✅ Terminé**.',
     badgesTitle: 'Badges à gagner',
     deadReckoningRule: 'tu as répondu sans aide d’une IA (sur l’honneur)',
     statusPending: '⏳ **Statut :** en attente de tes réponses.',
@@ -35064,6 +35143,8 @@ function renderQuizComment({ state, author, messages: m, modelLabel, maxAttempts
     const f = formatTexts(m, formatOf(state));
     const lines = [encodeState(state), '', `## ${m.quizTitle}`, ''];
     lines.push(m.quizIntro(author, state.questions.length), '');
+    const choice = formatOf(state) === 'multiple-choice';
+    const pending = state.status === 'pending';
     for (const question of state.questions) {
         lines.push(`**${question.id}. ${sanitize(question.text)}**`);
         const files = question.files.slice(0, 3).map(inlineCode).join(', ');
@@ -35071,14 +35152,27 @@ function renderQuizComment({ state, author, messages: m, modelLabel, maxAttempts
         if (question.options) {
             for (const letter of OPTION_LETTERS) {
                 const line = optionLine(question, letter);
-                if (line)
+                // While the quiz is open, options are checkboxes the author ticks in place.
+                if (line && pending)
+                    lines.push(`- [ ] ${line} ${pickMarker(question.id, letter)}`);
+                else if (line)
                     lines.push(`- ${line}`);
             }
             lines.push('');
         }
     }
-    lines.push(`### ${m.howToAnswerTitle}`, '', f.howToAnswer, '', renderAnswerTemplate(state, m), '');
-    lines.push(`<sub>${m.deadReckoningHint}</sub>`, '');
+    if (choice && pending) {
+        lines.push(`### ${m.howToAnswerTitle}`, '', f.howToAnswer, '');
+        lines.push(`- [ ] ${m.deadReckoningLine} ${DEAD_RECKONING_MARKER}`);
+        lines.push(`- [ ] ✅ ${m.submitLine} ${SUBMIT_MARKER}`, '');
+        lines.push(`<sub>${m.deadReckoningHint}</sub>`, '');
+        lines.push(`<details><summary>${m.cantTickTitle}</summary>`, '', m.cantTick, '');
+        lines.push(renderAnswerTemplate(state, m), '', '</details>', '');
+    }
+    else if (!choice) {
+        lines.push(`### ${m.howToAnswerTitle}`, '', f.howToAnswer, '', renderAnswerTemplate(state, m), '');
+        lines.push(`<sub>${m.deadReckoningHint}</sub>`, '');
+    }
     lines.push(`<details><summary>${m.badgesTitle}</summary>`, '');
     for (const rank of RANKS)
         lines.push(`- **${RANK_LABELS[rank].name}**: ${f.rankRules[rank]}`);
@@ -38672,10 +38766,14 @@ function plural(count, word) {
 
 async function handleIssueComment(event, deps) {
     const { issue, comment } = event;
-    if (event.action !== 'created' || !issue || !comment)
-        return skipped('not a new comment.');
+    if (!issue || !comment)
+        return skipped('the event has no comment.');
     if (!issue.pull_request)
         return skipped('the comment is on an issue, not a pull request.');
+    if (event.action === 'edited')
+        return handleTicks(event, deps);
+    if (event.action !== 'created')
+        return skipped(`comment action "${event.action}" is not handled.`);
     if (!isOwnershipCommand(comment.body))
         return skipped('the comment does not start with /ownership.');
     if (isBotAccount(comment.user))
@@ -38711,6 +38809,67 @@ async function handleIssueComment(event, deps) {
     await gh.addReaction(comment.id, 'eyes').catch(error => {
         debug(`Could not add a reaction: ${String(error)}`);
     });
+    return grade(deps, {
+        number: issue.number,
+        author: issue.user.login,
+        existing,
+        parsed,
+        messages,
+        maxAttempts
+    });
+}
+/**
+ * Multiple-choice quizzes are answered by ticking boxes in the quiz comment. Each tick edits the
+ * comment; grading starts when the PR author ticks "Done".
+ */
+async function handleTicks(event, deps) {
+    const issue = event.issue;
+    const comment = event.comment;
+    if (!isBotAccount(comment.user))
+        return skipped('the edited comment is not an OwnerShip quiz.');
+    if (event.sender?.login !== issue.user.login) {
+        return skipped(`only the pull request author (@${issue.user.login}) can submit the quiz; ` +
+            `the edit by @${event.sender?.login ?? 'unknown'} is ignored.`);
+    }
+    const { gh, config } = deps;
+    const existing = findQuizComment(await gh.listComments(issue.number));
+    if (!existing || existing.comment.id !== comment.id) {
+        return skipped('the edited comment is not the OwnerShip quiz.');
+    }
+    const { state } = existing;
+    if (formatOf(state) !== 'multiple-choice' || state.status !== 'pending') {
+        return skipped('the quiz is not waiting for ticked answers.');
+    }
+    // The freshest body, in case the author kept ticking while this run was queued.
+    const body = existing.comment.body;
+    const ticks = parseTicks(body, state.questions);
+    if (!ticks.submitted)
+        return skipped('"Done" is not ticked yet.');
+    const messages = messagesFor(config.language);
+    if (ticks.conflicts.length > 0 || ticks.empty) {
+        await gh.updateComment(existing.comment.id, untickSubmit(body));
+        await gh.createComment(issue.number, ticks.conflicts.length > 0
+            ? messages.conflicts(ticks.conflicts.join(', '))
+            : messages.nothingTicked);
+        return skipped(ticks.conflicts.length > 0
+            ? `several boxes ticked for question(s) ${ticks.conflicts.join(', ')}.`
+            : '"Done" was ticked without any option.');
+    }
+    return grade(deps, {
+        number: issue.number,
+        author: issue.user.login,
+        existing,
+        parsed: ticks,
+        messages,
+        maxAttempts: 1
+    });
+}
+/** Grades one attempt, posts the debrief, updates the quiz, the labels and the status. */
+async function grade(deps, input) {
+    const { gh, config } = deps;
+    const { existing, parsed, messages, maxAttempts, author } = input;
+    const { state } = existing;
+    const issue = { number: input.number, user: { login: author } };
     const pr = await gh.getPullRequest(issue.number);
     const { digest } = await loadDiff(gh, issue.number, config);
     const request = evaluationRequest({
@@ -38926,7 +39085,9 @@ async function handlePullRequest(event, deps) {
         next = { ...state, headSha: pr.head.sha };
         kind = 'quiz-updated';
     }
-    await gh.updateComment(comment.id, rerender(next));
+    // Same questions: keep the boxes the author already ticked.
+    const body = kind === 'quiz-refreshed' ? rerender(next) : carryTicks(comment.body, rerender(next));
+    await gh.updateComment(comment.id, body);
     await reportStatus(deps, pr.head.sha, 'pending', 'Waiting for the author to answer the quiz', comment.html_url);
     return {
         kind,

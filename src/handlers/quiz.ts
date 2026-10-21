@@ -1,6 +1,7 @@
 import * as core from '@actions/core'
 import { createHash } from 'node:crypto'
 import { modelLabel, requiresApiKey } from '../config.js'
+import { carryTicks } from '../comment/answers.js'
 import { messagesFor } from '../comment/i18n.js'
 import { renderQuizComment, sanitize } from '../comment/render.js'
 import { OPTION_LETTERS, type QuizQuestion, type QuizState } from '../comment/state.js'
@@ -164,7 +165,9 @@ export async function handlePullRequest(event: PullRequestEvent, deps: Deps): Pr
     kind = 'quiz-updated'
   }
 
-  await gh.updateComment(comment.id, rerender(next))
+  // Same questions: keep the boxes the author already ticked.
+  const body = kind === 'quiz-refreshed' ? rerender(next) : carryTicks(comment.body, rerender(next))
+  await gh.updateComment(comment.id, body)
   await reportStatus(
     deps,
     pr.head.sha,
